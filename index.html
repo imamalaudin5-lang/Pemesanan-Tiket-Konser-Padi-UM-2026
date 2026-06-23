@@ -539,6 +539,11 @@
                 </div>
 
                 <div class="flex flex-wrap gap-3">
+                    <!-- Sync from Sheets Button -->
+                    <button onclick="loadOrdersData()" class="bg-white border border-slate-200 hover:border-blue-500 text-slate-700 px-4 py-2.5 rounded-xl text-xs font-bold shadow-sm transition-all flex items-center space-x-2">
+                        <i class="fa-solid fa-arrows-rotate text-blue-500"></i>
+                        <span>Sinkronkan Data</span>
+                    </button>
                     <!-- Config Sheet Webhook button -->
                     <button onclick="toggleWebhookModal()" class="bg-white border border-slate-200 hover:border-blue-500 text-slate-700 px-4 py-2.5 rounded-xl text-xs font-bold shadow-sm transition-all flex items-center space-x-2">
                         <i class="fa-brands fa-google text-blue-500"></i>
@@ -692,7 +697,7 @@
             
             <div class="p-6 space-y-4">
                 <p class="text-xs text-slate-500 leading-relaxed">
-                    Setiap pemesanan baru dapat dikirim secara otomatis ke Google Spreadsheet Anda menggunakan fitur Webhook Google Apps Script.
+                    Setiap pemesanan baru akan dikirim secara otomatis dan dapat disinkronkan ke seluruh perangkat menggunakan fitur Webhook Google Apps Script.
                 </p>
 
                 <!-- Step Guide -->
@@ -730,7 +735,9 @@
       data.total_payment,
       data.sender_name,
       data.payment_date,
-      data.timestamp
+      data.timestamp,
+      data.proof_image,
+      JSON.stringify(data.tickets)
     ]);
     return ContentService.createTextOutput(JSON.stringify({"result":"success"})).setMimeType(ContentService.MimeType.JSON);
   } catch (err) {
@@ -756,7 +763,7 @@
                 </div>
                 <h3 class="font-extrabold text-slate-900 text-lg">Hapus Data Pemesanan?</h3>
                 <p class="text-sm text-slate-500 leading-relaxed">
-                    Data yang dihapus tidak dapat dikembalikan dari sistem.
+                    Data yang dihapus tidak dapat dikembalikan dari sistem internal. Jika data sudah terkirim ke Google Sheets, Anda juga harus menghapus barisnya secara manual di Google Sheets.
                 </p>
             </div>
             
@@ -793,7 +800,6 @@
         let isAdminLoggedIn = false; // State to track admin session
         let lastOrderPayload = null; // Store last order for the success page
         
-        let ticketsSold = { vip: 0, tribun_a: 0, tribun_b: 0 };
         let deleteTargetId = null;
         const firebaseConfig = {
             projectId: "demo-project",
@@ -837,7 +843,6 @@
 
         // Countdown Clock Functionality
         function startCountdown() {
-            // Target deadline: 29 June 2026 23:59:00 WIB (GMT+7)
             const deadlineTime = new Date("June 29, 2026 23:59:00 GMT+0700").getTime();
             const timerDisplay = document.getElementById('timer-display');
             const submitBtn = document.getElementById('btn-submit');
@@ -852,12 +857,10 @@
                     timerDisplay.innerHTML = "PEMESANAN TELAH DITUTUP";
                     timerDisplay.className = "text-sm font-extrabold text-red-500 animate-pulse";
                     
-                    // Disable submit button securely
                     submitBtn.disabled = true;
                     submitBtn.innerHTML = `<span>PEMESANAN DITUTUP (MELEWATI BATAS WAKTU)</span> <i class="fa-solid fa-lock text-lg"></i>`;
                     submitBtn.className = "w-full bg-slate-200 text-slate-400 border border-slate-300 font-bold py-4 px-6 rounded-xl cursor-not-allowed transition-all flex items-center justify-center space-x-2 text-sm sm:text-base";
                     
-                    // Turn banner styling to full alert warning
                     banner.className = "bg-gradient-to-r from-red-50 to-slate-100 border border-red-300 rounded-2xl p-4 flex flex-col md:flex-row items-center justify-between gap-4 shadow-sm";
                     return;
                 }
@@ -885,7 +888,7 @@
 
         window.adjustQty = function(ticketType, change) {
             const currentQty = quantities[ticketType];
-            const maxAllowed = 10; // Max allowed per checkout transaction
+            const maxAllowed = 10;
 
             const newQty = Math.max(0, Math.min(maxAllowed, currentQty + change));
             
@@ -912,16 +915,16 @@
                 const subtotal = quantities[type] * prices[type];
                 total += subtotal;
 
-                // Update subtotal in individual rows
                 const subtotalEl = document.getElementById(`subtotal-${type}`);
                 if (subtotalEl) {
                     subtotalEl.innerText = formatIDR(subtotal);
                 }
 
                 if (quantities[type] > 0) {
+                    const label = type === 'vip' ? 'VIP Standing' : type === 'tribun_a' ? 'Tribun A (Tribun bawah)' : 'Tribun B (Tribun Atas)';
                     summaryRows.push(`
                         <div class="flex justify-between items-center py-1">
-                            <span class="font-semibold text-slate-700">${type === 'vip' ? 'VIP Standing' : type === 'tribun_a' ? 'Tribun A (Tribun bawah)' : 'Tribun B (Tribun Atas)'}</span>
+                            <span class="font-semibold text-slate-700">${label}</span>
                             <span class="text-gold-650 font-bold">${quantities[type]}x</span>
                             <span class="text-right text-slate-900 font-bold">${formatIDR(subtotal)}</span>
                         </div>
@@ -929,7 +932,6 @@
                 }
             });
 
-            // Update Sticky Summary UI
             if (summaryRows.length > 0) {
                 if (summaryEmpty) summaryEmpty.classList.add('hidden');
                 if (summaryList) summaryList.classList.remove('hidden');
@@ -939,12 +941,10 @@
                 if (summaryList) summaryList.classList.add('hidden');
             }
 
-            // Update Total Sum
             const totalPayAmount = document.getElementById('total-payment-amount');
             if (totalPayAmount) totalPayAmount.innerText = formatIDR(total);
         }
 
-        // Helper: Format Indonesian Rupiah
         function formatIDR(value) {
             return new Intl.NumberFormat('id-ID', {
                 style: 'currency',
@@ -968,17 +968,45 @@
 
             const reader = new FileReader();
             reader.onload = function(e) {
-                base64ProofImage = e.target.result;
-                document.getElementById('upload-preview').src = base64ProofImage;
-                document.getElementById('upload-placeholder').classList.add('hidden');
-                document.getElementById('upload-preview-container').classList.remove('hidden');
-                document.getElementById('proof-filename').innerText = file.name;
-                showToast("Bukti pembayaran berhasil dilampirkan.", "success");
+                // Resize image to max 600px width/height before upload to save Google Sheets cell space
+                const img = new Image();
+                img.onload = function() {
+                    const canvas = document.createElement('canvas');
+                    let width = img.width;
+                    let height = img.height;
+                    const max_size = 600;
+
+                    if (width > height) {
+                        if (width > max_size) {
+                            height *= max_size / width;
+                            width = max_size;
+                        }
+                    } else {
+                        if (height > max_size) {
+                            width *= max_size / height;
+                            height = max_size;
+                        }
+                    }
+
+                    canvas.width = width;
+                    canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, width, height);
+
+                    // Compress to lightweight JPEG quality 0.7
+                    base64ProofImage = canvas.toDataURL('image/jpeg', 0.7);
+
+                    document.getElementById('upload-preview').src = base64ProofImage;
+                    document.getElementById('upload-placeholder').classList.add('hidden');
+                    document.getElementById('upload-preview-container').classList.remove('hidden');
+                    document.getElementById('proof-filename').innerText = file.name;
+                    showToast("Bukti pembayaran berhasil diunggah & dioptimalkan.", "success");
+                };
+                img.src = e.target.result;
             };
             reader.readAsDataURL(file);
         };
 
-        // Open viewer modal for payment proofs
         window.showProofModalOnly = function(imageSrc) {
             const modal = document.createElement('div');
             modal.id = 'proof-viewer-modal';
@@ -993,7 +1021,6 @@
             document.body.appendChild(modal);
         };
 
-        // Copy Bank Account Number
         window.copyToClipboard = function(text) {
             const input = document.createElement('input');
             input.value = text;
@@ -1004,7 +1031,6 @@
             showToast("Nomor rekening berhasil disalin!", "success");
         };
 
-        // Toast Notification System
         window.showToast = function(message, type = "success") {
             const container = document.getElementById('notification-box');
             if (!container) return;
@@ -1024,12 +1050,10 @@
             
             container.appendChild(toast);
             
-            // Fade-in
             setTimeout(() => {
                 toast.classList.remove('translate-y-2', 'opacity-0');
             }, 10);
 
-            // Fade-out and Remove
             setTimeout(() => {
                 toast.classList.add('translate-y-2', 'opacity-0');
                 setTimeout(() => {
@@ -1038,7 +1062,6 @@
             }, 3000);
         };
 
-        /* GOOGLE SHEETS WEBHOOK SETTINGS */
         let webhookUrl = localStorage.getItem('google_sheets_webhook_url') || "";
 
         window.toggleWebhookModal = function() {
@@ -1049,7 +1072,7 @@
             }
         };
 
-        window.saveWebhookSettings = function() {
+        window.saveWebhookSettings = async function() {
             const url = document.getElementById('webhook-url-input').value.trim();
             if (url && !url.startsWith('https://script.google.com/')) {
                 showToast("URL Webhook tidak valid! Harus berawalan Google Apps Script URL.", "error");
@@ -1059,6 +1082,8 @@
             localStorage.setItem('google_sheets_webhook_url', url);
             showToast("Konfigurasi Google Sheets berhasil disimpan!", "success");
             toggleWebhookModal();
+            // Muat ulang data terbaru secara silang dari Google Sheets
+            await loadOrdersData();
         };
 
         window.copyAppsScriptCode = function() {
@@ -1068,18 +1093,36 @@
             showToast("Kode disalin! Tempel di Google Apps Script Anda.", "success");
         };
 
+        async function fetchOrdersFromGoogleSheets() {
+            if (!webhookUrl) return false;
+            try {
+                // Fetch GET untuk menarik data rekap dari Google Sheets Web App
+                const response = await fetch(webhookUrl);
+                if (!response.ok) throw new Error("HTTP Error");
+                const data = await response.json();
+                if (Array.isArray(data)) {
+                    ordersData = data;
+                    ordersData.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+                    updateRekapStats();
+                    updateRekapTable();
+                    return true;
+                }
+            } catch (err) {
+                console.warn("Gagal menarik data dari Webhook Google Sheets: ", err);
+            }
+            return false;
+        }
+
         /* FORM SUBMISSION LOGIC */
         window.handleFormSubmit = async function(event) {
             event.preventDefault();
 
-            // Validate Ticket Quantities (must have ordered at least 1)
             const totalTickets = quantities.vip + quantities.tribun_a + quantities.tribun_b;
             if (totalTickets === 0) {
                 showToast("Silakan pilih minimal 1 tiket untuk melanjutkan pemesanan!", "error");
                 return;
             }
 
-            // Confirm checkboxes
             const proofAttached = document.getElementById('proof_attached').checked;
             const statementAgreed = document.getElementById('statement_agreed').checked;
             if (!proofAttached || !statementAgreed) {
@@ -1087,12 +1130,10 @@
                 return;
             }
 
-            // Disable submit button during action
             const submitBtn = document.getElementById('btn-submit');
             submitBtn.disabled = true;
             submitBtn.innerHTML = `<i class="fa-solid fa-circle-notch animate-spin mr-2"></i> Mengirim data...`;
 
-            // Prepare Payload
             const totalPayment = (quantities.vip * prices.vip) + (quantities.tribun_a * prices.tribun_a) + (quantities.tribun_b * prices.tribun_b);
             
             const ticketsFormatted = [];
@@ -1101,7 +1142,7 @@
             if (quantities.tribun_b > 0) ticketsFormatted.push(`Tribun B (Tribun Atas) (${quantities.tribun_b}x)`);
 
             const orderPayload = {
-                id: isFirebaseActive() ? undefined : crypto.randomUUID(),
+                id: isFirebaseActive() ? undefined : "local-" + crypto.randomUUID(),
                 nama: document.getElementById('nama').value,
                 id_number: document.getElementById('id_number').value,
                 unit_kerja: document.getElementById('unit_kerja').value,
@@ -1118,32 +1159,11 @@
             };
 
             try {
-                // Ensure auth user before write if Firebase is active
-                if (isFirebaseActive()) {
-                    if (!auth.currentUser) {
-                        await authenticate();
-                    }
-                    // Generate pseudo appId for firestore paths in sandbox environments
-                    const appIdStr = "PADI_REBORN_APP_2026";
-                    const docRef = collection(db, 'artifacts', appIdStr, 'public', 'data', 'orders');
-                    await addDoc(docRef, orderPayload);
-                } else {
-                    // Fallback to local storage
-                    const localOrders = JSON.parse(localStorage.getItem('padi_local_orders') || '[]');
-                    localOrders.push(orderPayload);
-                    localStorage.setItem('padi_local_orders', JSON.stringify(localOrders));
-                    
-                    // Sync internal list immediately
-                    ordersData = localOrders;
-                    ordersData.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-                    updateRekapTable();
-                    updateRekapStats();
-                }
-
-                // Dispatch to Webhook if set up
+                // Simpan ke Google Sheets via Webhook (POST) jika telah dikonfigurasi
+                let webhookPosted = false;
                 if (webhookUrl) {
                     try {
-                        await fetch(webhookUrl, {
+                        const postResponse = await fetch(webhookUrl, {
                             method: "POST",
                             mode: "no-cors",
                             headers: {
@@ -1151,15 +1171,26 @@
                             },
                             body: JSON.stringify(orderPayload)
                         });
-                        showToast("Data berhasil direkap ke Google Spreadsheet Anda!", "success");
+                        webhookPosted = true;
                     } catch (err) {
-                        console.error("Failed to post to webhook: ", err);
+                        console.error("Gagal mengirim data ke Webhook: ", err);
                     }
+                }
+
+                // Sebagai fallback, tetap simpan di lokal agar ada salinan cadangan
+                if (isFirebaseActive()) {
+                    if (!auth.currentUser) await authenticate();
+                    const appIdStr = "PADI_REBORN_APP_2026";
+                    const docRef = collection(db, 'artifacts', appIdStr, 'public', 'data', 'orders');
+                    await addDoc(docRef, orderPayload);
+                } else {
+                    const localOrders = JSON.parse(localStorage.getItem('padi_local_orders') || '[]');
+                    localOrders.push(orderPayload);
+                    localStorage.setItem('padi_local_orders', JSON.stringify(localOrders));
                 }
 
                 showToast("Pemesanan tiket berhasil didaftarkan!", "success");
                 
-                // Save payload for the success page and switch tab
                 lastOrderPayload = orderPayload;
                 window.scrollTo({ top: 0, behavior: 'smooth' });
                 switchTab('success');
@@ -1173,6 +1204,13 @@
                 document.getElementById('upload-placeholder').classList.remove('hidden');
                 document.getElementById('upload-preview-container').classList.add('hidden');
                 base64ProofImage = "";
+
+                // Tarik ulang data segar dari Google Sheets
+                if (webhookUrl) {
+                    await fetchOrdersFromGoogleSheets();
+                } else {
+                    loadLocalOrdersFallback();
+                }
 
             } catch (error) {
                 console.error("Save Error: ", error);
@@ -1197,20 +1235,38 @@
                     snapshot.forEach((doc) => {
                         ordersData.push({ id: doc.id, ...doc.data() });
                     });
-
-                    // Sort locally by timestamp descending
                     ordersData.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-
                     updateRekapStats();
                     updateRekapTable();
                 }, (error) => {
-                    console.error("Firestore error, loading from local fallback: ", error);
                     loadLocalOrdersFallback();
                 });
             } else {
-                loadLocalOrdersFallback();
+                // Tarik data Google Sheets secara global
+                loadOrdersData();
             }
         }
+
+        window.loadOrdersData = async function() {
+            const tableBody = document.getElementById('rekap-table-body');
+            tableBody.innerHTML = `
+                <tr id="table-loading-row">
+                    <td colspan="11" class="py-12 text-center text-slate-400">
+                        <i class="fa-solid fa-spinner animate-spin text-2xl text-gold-500 mb-2"></i>
+                        <p>Menyelaraskan data multi-perangkat via Google Sheets...</p>
+                    </td>
+                </tr>
+            `;
+
+            let hasSynced = false;
+            if (webhookUrl) {
+                hasSynced = await fetchOrdersFromGoogleSheets();
+            }
+            
+            if (!hasSynced) {
+                loadLocalOrdersFallback();
+            }
+        };
 
         function loadLocalOrdersFallback() {
             const localOrders = JSON.parse(localStorage.getItem('padi_local_orders') || '[]');
@@ -1220,12 +1276,10 @@
             updateRekapTable();
         }
 
-        /* REKAP TABLE & METRICS UPDATE */
         function updateRekapTable() {
             const tableBody = document.getElementById('rekap-table-body');
             const searchVal = document.getElementById('rekap-search').value.toLowerCase().trim();
             
-            // Filter locally
             const filteredOrders = ordersData.filter(order => {
                 return (
                     order.nama?.toLowerCase().includes(searchVal) ||
@@ -1292,7 +1346,7 @@
 
             tableBody.innerHTML = rowsHtml;
 
-            // Secure click listeners to dynamic tables
+            // Attach secure click listeners
             filteredOrders.forEach((order, index) => {
                 const viewBtn = document.getElementById(`view-btn-${index}`);
                 if (viewBtn) {
@@ -1309,7 +1363,6 @@
             });
         }
 
-        // Helper calculations
         function getTotalTicketsCount(tickets) {
             if (!tickets) return 0;
             return (tickets.vip || 0) + (tickets.tribun_a || 0) + (tickets.tribun_b || 0);
@@ -1352,8 +1405,6 @@
                 }
             });
 
-            ticketsSold = { vip: vipTotal, tribun_a: tribunATotal, tribun_b: tribunBTotal };
-
             document.getElementById('stat-total-orders').innerText = totalOrders;
             document.getElementById('stat-total-vip').innerText = vipTotal;
             document.getElementById('stat-total-tribun_a').innerText = tribunATotal;
@@ -1364,7 +1415,6 @@
             updateRekapTable();
         };
 
-        /* EXPORT DATA TO CSV (EXCEL / GOOGLE SHEETS) */
         window.exportToCSV = function() {
             if (ordersData.length === 0) {
                 showToast("Tidak ada data rekap untuk diekspor!", "error");
@@ -1372,8 +1422,6 @@
             }
 
             let csvContent = "data:text/csv;charset=utf-8,";
-            
-            // Header
             csvContent += "No,Nama Pemesan,NIP/NITK/NIM,Unit Kerja,WhatsApp,Detail Tiket,Total Pembayaran,Nama Pengirim BRI,Tanggal Bayar,Timestamp\n";
 
             ordersData.forEach((order, index) => {
@@ -1402,15 +1450,12 @@
             showToast("Rekap CSV berhasil diunduh!", "success");
         };
 
-        /* RECEIPT / RECORD DETAIL MODAL */
         window.viewOrderDetails = function(order) {
             showReceiptModal(order);
         };
 
         function showReceiptModal(order) {
             const modalContent = document.getElementById('modal-detail-content');
-            
-            // Generate pseudo-random booking code based on timestamp
             const bookingCode = "PDI-" + (order.timestamp ? new Date(order.timestamp).getTime().toString().slice(-6) : Math.floor(Math.random()*900000+100000));
             
             modalContent.innerHTML = `
@@ -1523,10 +1568,8 @@
             window.scrollTo({ top: 0, behavior: 'smooth' });
         };
 
-        /* ADMIN GATEKEEPER & ACCESS CONTROL */
         window.toggleAdminAccess = function() {
             if (isAdminLoggedIn) {
-                // Logout Admin Action
                 isAdminLoggedIn = false;
                 document.getElementById('tab-rekap-btn').classList.add('hidden');
                 document.getElementById('admin-lock-icon').className = "fa-solid fa-lock text-sm text-gold-600";
@@ -1552,21 +1595,14 @@
             event.preventDefault();
             const password = document.getElementById('admin-password').value;
             
-            // Validate against the custom password set for the admin
             if (password === 'admin2026') {
                 isAdminLoggedIn = true;
-                
-                // Show the tab
                 document.getElementById('tab-rekap-btn').classList.remove('hidden');
-                
-                // Switch Lock Icon to Open Lock / Logged-in state
                 document.getElementById('admin-lock-icon').className = "fa-solid fa-lock-open text-sm text-green-650";
                 document.getElementById('admin-lock-btn').title = "Keluar Sesi Admin";
                 
                 closeAdminLoginModal();
                 showToast("Hak akses diverifikasi. Selamat datang, Admin!", "success");
-                
-                // Switch directly to the recap tab
                 switchTab('rekap');
             } else {
                 showToast("Kata sandi salah! Silakan coba lagi.", "error");
@@ -1598,11 +1634,13 @@
                     let localOrders = JSON.parse(localStorage.getItem('padi_local_orders') || '[]');
                     localOrders = localOrders.filter(o => o.id !== deleteTargetId && o.timestamp !== deleteTargetId);
                     localStorage.setItem('padi_local_orders', JSON.stringify(localOrders));
-                    ordersData = localOrders;
+                    
+                    // Filter dari internal list
+                    ordersData = ordersData.filter(o => o.id !== deleteTargetId && o.timestamp !== deleteTargetId);
                     updateRekapStats();
                     updateRekapTable();
                 }
-                showToast("Data pemesanan berhasil dihapus.", "success");
+                showToast("Data pemesanan lokal berhasil dihapus.", "success");
             } catch (err) {
                 console.error(err);
                 showToast("Gagal menghapus data.", "error");
@@ -1621,12 +1659,10 @@
             const formBtn = document.getElementById('tab-form-btn');
             const rekapBtn = document.getElementById('tab-rekap-btn');
 
-            // Hide all sections
             if (formSec) formSec.classList.add('hidden');
             if (rekapSec) rekapSec.classList.add('hidden');
             if (successSec) successSec.classList.add('hidden');
 
-            // Reset button styles
             formBtn.className = "px-4 py-2 text-xs sm:text-sm font-bold rounded-lg text-slate-500 hover:text-slate-900 transition-all duration-200";
             rekapBtn.className = "hidden px-4 py-2 text-xs sm:text-sm font-bold rounded-lg text-slate-500 hover:text-slate-900 transition-all duration-200";
             if (isAdminLoggedIn) {
@@ -1644,25 +1680,23 @@
                 }
                 rekapSec.classList.remove('hidden');
                 rekapBtn.className = "px-4 py-2 text-xs sm:text-sm font-bold rounded-lg transition-all duration-200 bg-gradient-to-r from-gold-500 to-amber-500 text-slate-950 shadow-md";
+                
+                // Sinkronkan data real-time silang dari Sheets saat tab Rekap dibuka
+                loadOrdersData();
             } else if (tabName === 'success') {
                 if (successSec) successSec.classList.remove('hidden');
             }
         };
 
-        // Window onload event triggers
         window.onload = async function() {
-            // Set default date to today
             const today = new Date().toISOString().split('T')[0];
             const dateInput = document.getElementById('payment_date');
             if (dateInput) dateInput.value = today;
 
-            // Start Countdown timer
             startCountdown();
-
-            // Start authentication
             await authenticate();
-
-            // Start listening for snapshot changes
+            
+            // Dengarkan atau muat data otomatis pertama kali
             startListeningToOrders();
         };
     </script>
